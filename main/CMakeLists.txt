@@ -1,7 +1,11 @@
+cmake_minimum_required(VERSION 3.16)
+
 idf_component_register(
-    SRCS 
+    SRCS
         "main.cpp" 
         "app_system_init.cpp"
-    INCLUDE_DIRS 
+    INCLUDE_DIRS
         "."
+    PRIV_REQUIRES
+        board
 )
