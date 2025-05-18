@@ -5,7 +5,7 @@
 #include "freertos/task.h"
 
 
-#define APP_SYSTEM_INIT_TASK_STACK_SIZE  (1 * 1024)
+#define APP_SYSTEM_INIT_TASK_STACK_SIZE  (3 * 1024)
 
 
 extern "C" void app_main() {

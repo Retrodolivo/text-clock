@@ -28,6 +28,7 @@ public:
     }
 
 private:
+    bool isInited_ = false;
     ILedMatrixDisplay::resolution_t resolution_;
     AddresableLED<LedType::WS2812B> *ledStrip_;
 };

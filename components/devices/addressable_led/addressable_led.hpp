@@ -235,6 +235,7 @@ void AddresableLED<Type>::setBrightness(uint8_t level)  {
 template<LedType Type>
 esp_err_t AddresableLED<Type>::setColor(const color::CRGB& color, size_t ledIndex) {
     if (ledIndex >= leds_.size()) {
+        ESP_LOGE(addressable_led::TAG, "setColor: invalid led index passed");
         return ESP_ERR_INVALID_SIZE;
     }
 
