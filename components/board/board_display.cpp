@@ -30,12 +30,34 @@ esp_err_t TextClockDisplay::drawPixel(const point_t& point, const color::CRGB& c
     const size_t LedsInRows = (point.y + 1) * resolution_.x;
     const size_t LedsCount = (point.y % 2) ? LedsInRows - point.x - 1 : point.x;
 
-    ESP_RETURN_ON_ERROR(ledStrip_->setColor(color, LedsCount), TAG, "failed to set"); // -1 to cast to index
-    ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "failed to set");
+    ESP_RETURN_ON_ERROR(ledStrip_->setColor(color, LedsCount), TAG, "drawPixel: failed to set");
+    ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "drawPixel: failed to update led strip buffer");
 
+    ESP_LOGI(TAG, "drawPixel: point{%d,%d} set up", point.x, point.y);
     return ESP_OK;
 }
 
 esp_err_t TextClockDisplay::clear(void) {
+    ESP_RETURN_ON_FALSE(isInited_, ESP_FAIL, TAG, "clear: not inited");
+
+    ledStrip_->clear();
+    ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "clear: failed to update led strip buffer");
+
+    return ESP_OK;
+}
+
+ILedMatrixDisplay::resolution_t TextClockDisplay::getResolution(void) const {
+    if (!isInited_) {
+        ESP_LOGE(TAG, "getResolution: not inited");
+    }
+
+    return resolution_;
+}
+
+esp_err_t TextClockDisplay::setBrightness(const uint8_t level) {
+    ESP_RETURN_ON_FALSE(isSupportBrightnessControl(), ESP_FAIL, TAG, "setBrightness: not supported");
+
+    ledStrip_->setBrightness(level);
+
     return ESP_OK;
 }

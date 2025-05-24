@@ -9,26 +9,22 @@ public:
     TextClockDisplay() = default;
     ~TextClockDisplay() { delete ledStrip_; }
 
-    esp_err_t init(const ILedMatrixDisplay::resolution_t& resolution) override;
-    
-    resolution_t getResolution() const {
-        return resolution_;
-    }
-    
+    esp_err_t init(const ILedMatrixDisplay::resolution_t& resolution);
+
+    resolution_t getResolution(void) const;
+
     esp_err_t drawPixel(const point_t& point, const color::CRGB& color);
 
     esp_err_t clear(void);
 
-    bool isSupportBrightnessControl(void) const override {
+    bool isSupportBrightnessControl(void) const {
         return true;
     }
 
-    esp_err_t setBrightness(const uint8_t level) {
-        return ESP_ERR_NOT_SUPPORTED;
-    }
+    esp_err_t setBrightness(const uint8_t level);
 
 private:
     bool isInited_ = false;
-    ILedMatrixDisplay::resolution_t resolution_;
-    AddresableLED<LedType::WS2812B> *ledStrip_;
+    ILedMatrixDisplay::resolution_t resolution_ = {0, 0};
+    AddresableLED<LedType::WS2812B> *ledStrip_ = nullptr;
 };

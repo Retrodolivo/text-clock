@@ -24,23 +24,3 @@ ILedMatrixDisplay *Board_getDisplay(void) {
     static TextClockDisplay display;
     return &display;
 }
-
-// Time basic operation
-esp_err_t Board_setTimeUTC(const time_st& time) {
-    // Hardware specific time setting code
-    
-
-    return ESP_OK;
-}
-
-time_st Board_getTimeUTC(void) {
-    return {0, 0, 0};
-}
-
-esp_err_t Board_showTime(void) {
-    return ESP_OK;
-}
-
-esp_err_t Board_hideTime(void) {
-    return ESP_OK;
-}

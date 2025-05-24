@@ -4,6 +4,7 @@ idf_component_register(
     SRCS 
         "board.cpp"
         "board_display.cpp"
+        "board_wifi.cpp"
     INCLUDE_DIRS
         "."
         "interface"
@@ -11,4 +12,5 @@ idf_component_register(
         modules
     PRIV_REQUIRES
         devices
+        esp_wifi
 )
