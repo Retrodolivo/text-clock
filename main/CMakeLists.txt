@@ -13,4 +13,5 @@ idf_component_register(
     PRIV_REQUIRES
         board
         nvs_flash
+        modules
 )

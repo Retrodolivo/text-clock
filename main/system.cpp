@@ -2,6 +2,7 @@
 #include "itf_board.hpp"
 #include "itf_wifi.hpp"
 #include "application.hpp"
+#include "nettime.hpp"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -10,6 +11,8 @@
 
 static const char *TAG = "systemTask";
 
+#define WIFI_SSID       "Retrolink2"
+#define WIFI_PASSWORD   "Thunder_Bolt1"
 
 static void systemWifiFail_Callback(WifiFailEvents event);
 
@@ -40,15 +43,22 @@ void systemTask(void *arg) {
     ret = Board_wifiInit();
     ESP_ERROR_CHECK(ret);
 
-    Board_wifiConnect(wifiConfig, pdMS_TO_TICKS(5000));
+    if (Board_wifiConnect(wifiConfig, pdMS_TO_TICKS(5000)) == ESP_OK) {
+        NetTime::init(); //< trying to connect to NTP server
+        
+    }
 
     ret = ApplicationInit();
     ESP_ERROR_CHECK(ret);
 
     /* Periodic system service*/
     while (1) {
+        if (NetTime::isInited() && NetTime::isSynced()) {
+            const auto timeStr = NetTime::getLocalTimeString("%Y-%m-%d %H:%M:%S");
+            ESP_LOGI(TAG, "%s", timeStr.c_str());
+        }
 
-        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
