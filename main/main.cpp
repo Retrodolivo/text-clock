@@ -1,15 +1,15 @@
-#include "app_system_init.hpp"
+#include "system.hpp"
 #include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 
-#define APP_SYSTEM_INIT_TASK_STACK_SIZE  (3 * 1024)
+#define SYSTEM_TASK_STACK_SIZE  (5 * 1024)
 
 
 extern "C" void app_main() {
-    if (xTaskCreate(appSystemInitTask, "appSystemInitTask", APP_SYSTEM_INIT_TASK_STACK_SIZE, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(systemTask, "systemTask", SYSTEM_TASK_STACK_SIZE, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE("app_main", "app system init task creation failed (insufficient heap?)");
     }
 
