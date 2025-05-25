@@ -10,7 +10,7 @@ public:
     using SyncCallback = std::function<void(bool success)>;
     static const std::string DefaultNtpServer;
 
-    static esp_err_t init(const std::string& ntpServer = DefaultNtpServer);
+    static esp_err_t init(const std::string& tz = "UTC0", const std::string& ntpServer = DefaultNtpServer, NetTime::SyncCallback syncCb = nullptr);
     static bool isInited(void);
     
     static void setTimezone(const std::string& tz);
@@ -23,7 +23,7 @@ public:
     static std::string getNtpServer(void);
     static void setNtpServer(const std::string& server);
 
-    static esp_err_t sync(SyncCallback cb = nullptr);
+    static esp_err_t sync(void);
     static bool isSynced(void);
 private:
     static void sntpCallback(struct timeval *tv);

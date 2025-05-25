@@ -33,23 +33,19 @@ void systemTask(void *arg) {
 
     ILedMatrixDisplay *display = Board_getDisplay();
     if (display == nullptr) {
-        ret = ESP_FAIL;
-        ESP_ERROR_CHECK(ret);
+        ESP_ERROR_CHECK(ESP_FAIL);
     }
 
-    ret = display->init({16, 16});
-    ESP_ERROR_CHECK(ret);
+    ESP_ERROR_CHECK(display->init({16, 16}));
 
-    ret = Board_wifiInit();
-    ESP_ERROR_CHECK(ret);
+    ESP_ERROR_CHECK(Board_wifiInit());
 
     if (Board_wifiConnect(wifiConfig, pdMS_TO_TICKS(5000)) == ESP_OK) {
         NetTime::init(); //< trying to connect to NTP server
         
     }
 
-    ret = ApplicationInit();
-    ESP_ERROR_CHECK(ret);
+    ESP_ERROR_CHECK(ApplicationInit());
 
     /* Periodic system service*/
     while (1) {
