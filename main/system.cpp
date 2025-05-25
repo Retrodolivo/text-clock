@@ -13,6 +13,7 @@ static const char *TAG = "systemTask";
 
 #define WIFI_SSID       "Retrolink2"
 #define WIFI_PASSWORD   "Thunder_Bolt1"
+#define LOCAL_TIMEZONE  "MSK-3"
 
 static void systemWifiFail_Callback(WifiFailEvents event);
 
@@ -41,8 +42,7 @@ void systemTask(void *arg) {
     ESP_ERROR_CHECK(Board_wifiInit());
 
     if (Board_wifiConnect(wifiConfig, pdMS_TO_TICKS(5000)) == ESP_OK) {
-        NetTime::init(); //< trying to connect to NTP server
-        
+        NetTime::init(LOCAL_TIMEZONE); //< trying to connect to NTP server
     }
 
     ESP_ERROR_CHECK(ApplicationInit());

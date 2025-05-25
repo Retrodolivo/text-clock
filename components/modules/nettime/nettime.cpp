@@ -146,11 +146,22 @@ std::string NetTime::getLocalTimeString(const char* format) {
 }
 
 void NetTime::setTimezone(const std::string& tz) {
+    assert(isInited_);
+    assert(mutex);
 
+    MUTEX_LOCK(mutex);
+
+    timezone_ = tz;
+    setenv("TZ", timezone_.c_str(), 1);
+    tzset();
+    
+    MUTEX_UNLOCK(mutex);
 }
 
 std::string NetTime::getTimezone(void) {
-    return {};
+    assert(isInited_);
+
+    return timezone_;
 }
 
 std::string NetTime::getNtpServer(void) {
