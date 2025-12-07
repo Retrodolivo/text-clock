@@ -1,6 +1,10 @@
 {
     "C_Cpp.intelliSenseEngine": "default",
-    "idf.espIdfPath": "/home/retroboy/esp/v5.4.1/esp-idf",
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/build/compile_commands.json",
+    "C_Cpp.default.browse.path": [
+        "${workspaceFolder}/**"
+    ],
+    "idf.espIdfPath": "/home/retroboy/esp/v5.5.1/esp-idf",
     "idf.toolsPath": "/home/retroboy/.espressif",
     "idf.pythonInstallPath": "/usr/bin/python3",
     "idf.svdFilePath": "${workspaceFolder}/esp32.svd",
