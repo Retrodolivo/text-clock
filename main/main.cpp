@@ -1,15 +1,13 @@
 #include "system.hpp"
-#include "esp_log.h"
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "esp_log.h"
 
-
-#define SYSTEM_TASK_STACK_SIZE  (5 * 1024)
-
+constexpr uint32_t SystemTaskStackSize = 5 * 1024;
 
 extern "C" void app_main() {
-    if (xTaskCreate(systemTask, "systemTask", SYSTEM_TASK_STACK_SIZE, NULL, 5, NULL) != pdPASS) {
+    if (xTaskCreate(systemTask, "systemTask", SystemTaskStackSize, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE("app_main", "app system init task creation failed (insufficient heap?)");
     }
 
