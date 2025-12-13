@@ -1,63 +1,104 @@
 #include "board_display.hpp"
+#include "addressable_led.hpp"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_check.h"
 
-#define DISPLAY_CONN_PIN  GPIO_NUM_23
+
+namespace board {
 
 static const char *TAG = "board_display";
 
-esp_err_t TextClockDisplay::init(const ILedMatrixDisplay::resolution_t& resolution) {
-    ledStrip_ = new AddresableLED<LedType::WS2812B>(resolution.x * resolution.y, DISPLAY_CONN_PIN);
-    ESP_RETURN_ON_FALSE(ledStrip_, ESP_FAIL, TAG, "failed to create ledstrip");
-    
-    ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "failed to update ledstrip buffer");
-
-    resolution_ = resolution;
-    isInited_ = true;
-    ESP_LOGI(TAG, "init: inited with %dx%d resolution", resolution_.x, resolution_.y);
-
-    return ESP_OK;
-}
-
-esp_err_t TextClockDisplay::drawPixel(const point_t& point, const color::CRGB& color) {
-    ESP_RETURN_ON_FALSE(isInited_, ESP_FAIL, TAG, "drawPixel: not inited");
-
-    if (point.x > resolution_.x || point.y > resolution_.y) {
-        ESP_LOGE(TAG, "drawPixel: x:%d,y:%d - no such point", point.x, point.y);
-        return ESP_ERR_INVALID_ARG;
+class LedMatrix::Impl {
+public:
+    Impl(const sys::display::Resolution &resolution, int gpioNum)
+      : resolution_(resolution)
+      , ledStrip_(std::make_unique<AddresableLED<LedType::WS2812B>>(resolution.totalPixels(),
+                                                                    static_cast<gpio_num_t>(gpioNum))) {
+        static StaticSemaphore_t mutexMem;
+        accessMutex_ = xSemaphoreCreateMutexStatic(&mutexMem);
     }
 
-    const size_t LedsInRows = (point.y + 1) * resolution_.x;
-    const size_t LedsCount = (point.y % 2) ? LedsInRows - point.x - 1 : point.x;
+    esp_err_t drawPixel(const sys::display::Point &point, const color::CRGB &color) {
+        if (!point.within(resolution_)) {
+            return ESP_ERR_INVALID_ARG;
+        }
 
-    ESP_RETURN_ON_ERROR(ledStrip_->setColor(color, LedsCount), TAG, "drawPixel: failed to set");
-    ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "drawPixel: failed to update led strip buffer");
+        const size_t LedsInRows = (point.y + 1) * resolution_.width;
+        const size_t LedsCount = (point.y % 2) ? LedsInRows - point.x - 1 : point.x;
 
-    ESP_LOGI(TAG, "drawPixel: point{%d,%d} set up", point.x, point.y);
-    return ESP_OK;
-}
+        if (lock()) {
+            ESP_RETURN_ON_ERROR(ledStrip_->setColor(color, LedsCount), TAG, "%s: failed to set", __func__);
+            ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "%s: failed to update led strip buffer", __func__);
+            ESP_LOGI(TAG, "%s: point{%d,%d} set up", __func__, point.x, point.y);            
+            
+            unlock();
+            return ESP_OK;
+        }
 
-esp_err_t TextClockDisplay::clear(void) {
-    ESP_RETURN_ON_FALSE(isInited_, ESP_FAIL, TAG, "clear: not inited");
-
-    ledStrip_->clear();
-    ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "clear: failed to update led strip buffer");
-
-    return ESP_OK;
-}
-
-ILedMatrixDisplay::resolution_t TextClockDisplay::getResolution(void) const {
-    if (!isInited_) {
-        ESP_LOGE(TAG, "getResolution: not inited");
+        return ESP_ERR_TIMEOUT;
     }
 
-    return resolution_;
+    esp_err_t clear() {
+        if (lock()) {
+            ledStrip_->clear();
+            ESP_RETURN_ON_ERROR(ledStrip_->update(), TAG, "%s: failed to update led strip buffer", __func__);
+            
+            unlock();
+            return ESP_OK;
+        }
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+    esp_err_t setBrightness(uint8_t level) {
+        if (lock()) {
+
+            ledStrip_->setBrightness(level);
+
+            unlock();
+            return ESP_OK;
+        }
+
+        return ESP_ERR_TIMEOUT;
+    }
+
+private:
+    sys::display::Resolution resolution_;
+    std::unique_ptr<AddresableLED<LedType::WS2812B>> ledStrip_;
+    SemaphoreHandle_t accessMutex_ = nullptr;
+
+    bool lock() {
+        return xSemaphoreTake(accessMutex_, portMAX_DELAY) == pdTRUE;
+    }
+
+    void unlock() {
+        xSemaphoreGive(accessMutex_);
+    }
+};
+
+
+/**
+ * @brief Use of pImpl
+ */
+
+LedMatrix::LedMatrix(const sys::display::Resolution &resolution, int gpioNum)
+  : IDisplay(resolution)
+  , pImpl_(std::make_unique<Impl>(resolution_, gpioNum)) {
 }
 
-esp_err_t TextClockDisplay::setBrightness(const uint8_t level) {
-    ESP_RETURN_ON_FALSE(isSupportBrightnessControl(), ESP_FAIL, TAG, "setBrightness: not supported");
+LedMatrix::~LedMatrix() = default;
 
-    ledStrip_->setBrightness(level);
-
-    return ESP_OK;
+esp_err_t LedMatrix::drawPixel(const sys::display::Point &point, const color::CRGB &color) {
+    return pImpl_->drawPixel(point, color);
 }
+
+esp_err_t LedMatrix::clear() {
+    return pImpl_->clear();
+}
+
+esp_err_t LedMatrix::setBrightness(uint8_t level) {
+    return pImpl_->setBrightness(level);
+}
+
+} // namespace board

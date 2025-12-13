@@ -1,30 +1,31 @@
 #pragma once
 
-#include "itf_display.hpp"
-#include "addressable_led.hpp"
+#include "sys_itf_display.hpp"
 #include "esp_err.h"
+#include <memory>
 
-class TextClockDisplay : public ILedMatrixDisplay {
+namespace board {
+
+constexpr int DISPLAY_CONN_GPIO = 23;
+
+constexpr sys::display::Resolution RESOLUTION = {
+    .width = 16,
+    .height = 16,
+};
+
+class LedMatrix: public sys::itf::IDisplay {
 public:
-    TextClockDisplay() = default;
-    ~TextClockDisplay() { delete ledStrip_; }
+    LedMatrix(const sys::display::Resolution &resolution = RESOLUTION, int gpioNum = DISPLAY_CONN_GPIO);
+    ~LedMatrix() override;
 
-    esp_err_t init(const ILedMatrixDisplay::resolution_t& resolution);
+    esp_err_t drawPixel(const sys::display::Point &point, const color::CRGB &color) override;
+    esp_err_t clear() override;
 
-    resolution_t getResolution(void) const;
-
-    esp_err_t drawPixel(const point_t& point, const color::CRGB& color);
-
-    esp_err_t clear(void);
-
-    bool isSupportBrightnessControl(void) const {
-        return true;
-    }
-
-    esp_err_t setBrightness(const uint8_t level);
+    esp_err_t setBrightness(uint8_t level) override;
 
 private:
-    bool isInited_ = false;
-    ILedMatrixDisplay::resolution_t resolution_ = {0, 0};
-    AddresableLED<LedType::WS2812B> *ledStrip_ = nullptr;
+    class Impl;
+    std::unique_ptr<Impl> pImpl_; //< pointer to implementation idiom
 };
+
+} // namespace board
