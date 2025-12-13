@@ -1,225 +1,298 @@
+#include "board_wifi.hpp"
+
 #include "freertos/FreeRTOS.h"
-#include "freertos/task.h"
-#include "freertos/event_groups.h"
-
-#include <cstring> // for memcpy
-#include <inttypes.h>
-#include <string>
-
-#include "itf_wifi.hpp"
-#include "esp_check.h"
-#include "esp_bit_defs.h"
+#include "freertos/semphr.h"
 #include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "nvs_flash.h"
+#include <vector>
+#include <string>
+#include <functional>
 
-#define WIFI_CONNECTED_FLAG BIT0
-#define WIFI_FAILED_FLAG    BIT1
+static const char *TAG = "WifiEsp32";
 
-typedef struct {
-    esp_netif_t *netif;
-    bool isUserRequest;
-    bool isInited;
-    void (*failCallBack)(WifiFailEvents event);
-} wifi_context_t;
+/* Map ESP32 authmode to our Security enum */
+sys::itf::IWifi::Security espAuthToSecurity(wifi_auth_mode_t auth) {
+    switch (auth) {
+        case WIFI_AUTH_OPEN:
+            return sys::itf::IWifi::Security::OPEN;
+        case WIFI_AUTH_WEP:
+            return sys::itf::IWifi::Security::WEP;
+        case WIFI_AUTH_WPA_PSK:
+            return sys::itf::IWifi::Security::WPA_PSK;
+        case WIFI_AUTH_WPA2_PSK:
+            return sys::itf::IWifi::Security::WPA2_PSK;
+        case WIFI_AUTH_WPA_WPA2_PSK:
+            return sys::itf::IWifi::Security::WPA_WPA2_PSK;
+        case WIFI_AUTH_WPA3_PSK:
+            return sys::itf::IWifi::Security::WPA3_PSK;
+        default:
+            return sys::itf::IWifi::Security::OPEN;
+    }
+}
 
-static const char *TAG = "board_wifi";
-static wifi_context_t gContext;
-static EventGroupHandle_t gWifiEventGroup;
+namespace board {
 
-static void eventHandler(void *arg, esp_event_base_t eventBase, int32_t eventId, void *eventData) {
-    if (eventBase == WIFI_EVENT) {
-        switch (eventId) {
+/**
+ * Implementation of WifiEsp32
+ */
+class WifiEsp32::Impl {
+public:
+    mutable SemaphoreHandle_t stateMutex = nullptr;
+    sys::itf::IWifi::State currentState = sys::itf::IWifi::State::DISCONNECTED;
+    std::string connectedSSID;
+    bool autoReconnect = true;
+
+    /* Callbacks */
+    sys::itf::IWifi::ConnectionCallback connectionCallback = nullptr;
+
+    /* Stored for reconnection */
+    struct {
+        std::string ssid;
+        std::string password;
+    } credentials;
+
+    std::vector<sys::itf::IWifi::NetworkInfo> scannedNetworks;
+
+    /* Esp32 specific event handlers */
+    esp_event_handler_instance_t wifiEventHandler = nullptr;
+    esp_event_handler_instance_t ipEventHandler = nullptr;
+
+    Impl() {
+        stateMutex = xSemaphoreCreateRecursiveMutex();
+        if (!stateMutex) {
+            ESP_LOGE(TAG, "Failed to create recursive mutex");
+        }
+    }
+
+    ~Impl() {
+        if (stateMutex) {
+            vSemaphoreDelete(stateMutex);
+        }
+    }
+
+    void lock() const {
+        if (stateMutex) {
+            xSemaphoreTakeRecursive(stateMutex, portMAX_DELAY);
+        }
+    }
+
+    void unlock() const {
+        if (stateMutex) {
+            xSemaphoreGiveRecursive(stateMutex);
+        }
+    }
+
+    void updateState(sys::itf::IWifi::State newState, const std::string &ssid = "") {
+        lock();
+        currentState = newState;
+        if (!ssid.empty()) {
+            connectedSSID = ssid;
+        }
+        unlock();
+
+        /* Notify user if it have to */
+        if (connectionCallback) {
+            connectionCallback(newState, connectedSSID);
+        }
+    }
+};
+
+static void wifiEventHandler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
+    WifiEsp32 *wifi = static_cast<WifiEsp32 *>(arg);
+    if (wifi == nullptr) {
+        return;
+    }
+
+    WifiEsp32::Impl *pImpl = wifi->getImplForEventHandler();
+    if (pImpl == nullptr) {
+        return;
+    }
+
+    if (event_base == WIFI_EVENT) {
+        switch (event_id) {
             case WIFI_EVENT_STA_START:
-                esp_wifi_connect();
+                ESP_LOGI(TAG, "WiFi STA started");
                 break;
 
-            case WIFI_EVENT_STA_DISCONNECTED: {
-                wifi_event_sta_disconnected_t* disconEvent = static_cast<wifi_event_sta_disconnected_t*>(eventData);
-                std::string reasonStr;
-                
-                /* Fail bit rise in case or NON user initiated disconnects*/
-                if (gContext.isUserRequest) {
-                    reasonStr = "User initiated";
-                    gContext.isUserRequest = false;
-                } else {
-                    switch (disconEvent->reason) {
-                        case WIFI_REASON_NO_AP_FOUND:
-                            reasonStr = "SSID not found";
-                            gContext.failCallBack(WifiFailEvents::FAIL_TO_CONNECT);
-                            break;
-                        case WIFI_REASON_BEACON_TIMEOUT:
-                            reasonStr = "Beacon timeout";
-                            gContext.failCallBack(WifiFailEvents::BEACON_TIMEOUT);
-                            break;
-                        default:
-                            reasonStr = "Unknown reason";
-                            gContext.failCallBack(WifiFailEvents::FAIL_UNKNOWN);
-                            break;
-                    }
-                    xEventGroupSetBits(gWifiEventGroup, WIFI_FAILED_FLAG);
+            case WIFI_EVENT_STA_CONNECTED:
+                {
+                    wifi_event_sta_connected_t *event = static_cast<wifi_event_sta_connected_t *>(event_data);
+                    std::string ssid(reinterpret_cast<const char *>(event->ssid));
+                    pImpl->updateState(sys::itf::IWifi::State::CONNECTED, ssid);
+
+                    ESP_LOGI(TAG, "Connected to %s", ssid.c_str());
+                    break;
                 }
 
-                ESP_LOGW(TAG, "wifi event handler: disconnected from AP (reason: #%d - %s)", disconEvent->reason, reasonStr.c_str());
-                xEventGroupClearBits(gWifiEventGroup, WIFI_CONNECTED_FLAG);
-                break;
-            }
+            case WIFI_EVENT_STA_DISCONNECTED:
+                {
+                    wifi_event_sta_disconnected_t *event = static_cast<wifi_event_sta_disconnected_t *>(event_data);
+                    std::string ssid(reinterpret_cast<const char *>(event->ssid));
+                    pImpl->updateState(sys::itf::IWifi::State::DISCONNECTED, ssid);
 
-            case WIFI_EVENT_STA_CONNECTED: {
-                wifi_event_sta_connected_t* connEvent = static_cast<wifi_event_sta_connected_t*>(eventData);
-                ESP_LOGI(TAG, "wifi event handler: connected to AP: %s , channel: %d)", connEvent->ssid, connEvent->channel);
-                break;
-            }
-            
+                    ESP_LOGW(TAG, "Disconnected from %s, reason: %d", ssid.c_str(), event->reason);
+                    /* Do reconnection if it have to */
+                    if (pImpl->autoReconnect && !pImpl->credentials.ssid.empty()) {
+                        ESP_LOGI(TAG, "Attempting auto-reconnect...");
+                        esp_wifi_connect();
+                    }
+                    break;
+                }
+
             default:
                 break;
         }
-    } else if (eventBase == IP_EVENT) {
-        switch (eventId) {
-            case IP_EVENT_STA_GOT_IP: {
-                ip_event_got_ip_t* gotIpEvent = static_cast<ip_event_got_ip_t*>(eventData);
-                ESP_LOGI(TAG, "wifi event handler: got IP: " IPSTR ", gateway: " IPSTR ", netmask: " IPSTR,
-                       IP2STR(&gotIpEvent->ip_info.ip),
-                       IP2STR(&gotIpEvent->ip_info.gw),
-                       IP2STR(&gotIpEvent->ip_info.netmask));
-                xEventGroupSetBits(gWifiEventGroup, WIFI_CONNECTED_FLAG);
-                break;
-            }
-            
-            default:
-                break;
+    } else if (event_base == IP_EVENT) {
+        if (event_id == IP_EVENT_STA_GOT_IP) {
+            ip_event_got_ip_t *event = static_cast<ip_event_got_ip_t *>(event_data);
+            ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
         }
     }
 }
 
-esp_err_t Board_wifiInit(void) {
-    if (Board_wifiIsInited()) {
-        ESP_LOGW(TAG, "init: already initialized");
-        return ESP_FAIL;
+/**
+ * WifiEsp32 implementation
+ */
+WifiEsp32::WifiEsp32()
+  : pImpl_(std::make_unique<Impl>()) {
+    // Initialize ESP32 WiFi
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
     }
-
-    gWifiEventGroup = xEventGroupCreate();
+    ESP_ERROR_CHECK(ret);
 
     ESP_ERROR_CHECK(esp_netif_init());
-
     ESP_ERROR_CHECK(esp_event_loop_create_default());
-    gContext.netif = esp_netif_create_default_wifi_sta();
+    esp_netif_create_default_wifi_sta();
 
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
-    esp_event_handler_instance_t instance_any_id;
-    esp_event_handler_instance_t instance_got_ip;
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
-                                                        ESP_EVENT_ANY_ID,
-                                                        &eventHandler,
-                                                        NULL,
-                                                        &instance_any_id));
-    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
-                                                        IP_EVENT_STA_GOT_IP,
-                                                        &eventHandler,
-                                                        NULL,
-                                                        &instance_got_ip));
+    /* Register event handlers */
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &wifiEventHandler, this,
+                                                        &pImpl_->wifiEventHandler));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &wifiEventHandler, this,
+                                                        &pImpl_->ipEventHandler));
 
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
-
-    ESP_LOGI(TAG, "init: wifi successfully inited");
-
-    gContext.isInited = true;
-
-    return ESP_OK;
-}
-
-esp_err_t Board_wifiDeinit(void) {
-    if (!Board_wifiIsInited()) {
-        ESP_LOGW(TAG, "deinit: wifi not even initialized");
-        return ESP_OK;
-    }
-
-    esp_err_t result = Board_wifiDisconnect();
-    if (result != ESP_OK) {
-        return result;
-    }
-
-    result = esp_wifi_deinit();
-    if (result != ESP_OK) {
-        ESP_LOGE(TAG, "deinit: failed to deinit");
-        return result;
-    }
-
-    ESP_LOGI(TAG, "deinit: successufully deinited");
-    return ESP_OK;
-}
-
-esp_err_t Board_wifiConnect(const itf_wifi_config_t& config, uint32_t timeoutMs) {
-    if (Board_wifiIsConnected()) {
-        ESP_LOGW(TAG, "connect: already connected. Disconnect first");
-        return ESP_ERR_INVALID_STATE;
-    }
-    
-    /* Register callback. Use it in event handler*/
-    gContext.failCallBack = config.failCallBack;
-
-    wifi_config_t wifiConfig {};
-    wifiConfig.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
-    wifiConfig.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
-    std::memcpy(wifiConfig.sta.ssid, config.ssid, sizeof(config.ssid));
-    std::memcpy(wifiConfig.sta.password, config.password, sizeof(config.password));
-
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifiConfig));
     ESP_ERROR_CHECK(esp_wifi_start());
-    ESP_LOGI(TAG, "connect: wifi started");
 
-    /* Waiting until either the connection is established (WIFI_CONNECTED_FLAG) or connection failed for the maximum
-     * number of retries (WIFI_FAILED_FLAG). The bits are set by eventHandler() */
-    const EventBits_t flags = xEventGroupWaitBits(gWifiEventGroup, WIFI_CONNECTED_FLAG | WIFI_FAILED_FLAG, pdFALSE, pdFALSE, pdMS_TO_TICKS(timeoutMs));
-
-    if ((flags & (WIFI_CONNECTED_FLAG | WIFI_FAILED_FLAG)) == 0) {
-        /* No flags - timeout occurs*/
-        ESP_LOGE(TAG, "connect: connection timeout after %" PRIu32 " ms", timeoutMs);
-        return ESP_ERR_TIMEOUT;
-    }
-    if (flags & WIFI_CONNECTED_FLAG) {
-        ESP_LOGI(TAG, "connect: connected to AP SSID:%s", config.ssid);
-        return ESP_OK;
-    } else if (flags & WIFI_FAILED_FLAG) {
-        ESP_LOGE(TAG, "connect: failed to connect to AP SSID:%s", config.ssid);
-        return ESP_FAIL;
-    } else {
-        ESP_LOGE(TAG, "connect: unexpected event");
-        return ESP_FAIL;        
-    }
+    ESP_LOGI(TAG, "WiFi initialized");
 }
 
-esp_err_t Board_wifiDisconnect(void) {
-    if (!Board_wifiIsConnected()) {
-        ESP_LOGI(TAG, "disconnect: not connected yet");
-        return ESP_ERR_INVALID_STATE;
+WifiEsp32::~WifiEsp32() {
+    disconnect();
+
+    /* Cleanup ESP32 handlers */
+    if (pImpl_->wifiEventHandler) {
+        esp_event_handler_instance_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, pImpl_->wifiEventHandler);
+    }
+    if (pImpl_->ipEventHandler) {
+        esp_event_handler_instance_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, pImpl_->ipEventHandler);
     }
 
-    gContext.isUserRequest = true;
+    esp_wifi_stop();
+    esp_wifi_deinit();
 
-    const esp_err_t err = esp_wifi_disconnect();
-    if (err == ESP_ERR_WIFI_NOT_INIT) {
-        ESP_LOGW(TAG, "disconnect: wifi not initialized when trying to disconnect");
-    } else if (err != ESP_OK) {
-        ESP_LOGE(TAG, "disconnect: failed to disconnect wifi");
-    } else {
-        ESP_LOGI(TAG, "disconnect: wifi disconnection initiated");
-    }
-
-    ESP_ERROR_CHECK(esp_wifi_stop());
-
-
-    return err;
+    ESP_LOGI(TAG, "WiFi deinitialized");
 }
 
+bool WifiEsp32::connect(const std::string &ssid, const std::string &password) {
+    pImpl_->lock();
 
-bool Board_wifiIsInited(void) {
-    return gContext.isInited;
-}
-
-bool Board_wifiIsConnected(void) {
-    if (!gContext.isInited) {
+    if (pImpl_->currentState == State::CONNECTING || pImpl_->currentState == State::CONNECTED) {
+        pImpl_->unlock();
+        ESP_LOGW(TAG, "Already connecting or connected");
         return false;
     }
-    return esp_netif_is_netif_up(gContext.netif);   
+
+    /* save credentials */
+    pImpl_->credentials.ssid = ssid;
+    pImpl_->credentials.password = password;
+
+    pImpl_->updateState(State::CONNECTING, ssid);
+    pImpl_->unlock();
+
+    /* Configure WiFi */
+    wifi_config_t wifi_config = {};
+    strncpy((char *)wifi_config.sta.ssid, ssid.c_str(), sizeof(wifi_config.sta.ssid) - 1);
+    strncpy((char *)wifi_config.sta.password, password.c_str(), sizeof(wifi_config.sta.password) - 1);
+
+    esp_err_t err = esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to set config: %s", esp_err_to_name(err));
+        pImpl_->updateState(State::ERROR, ssid);
+        return false;
+    }
+
+    err = esp_wifi_connect();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to connect: %s", esp_err_to_name(err));
+        pImpl_->updateState(State::ERROR, ssid);
+        return false;
+    }
+
+    ESP_LOGI(TAG, "Connecting to %s...", ssid.c_str());
+    return true;
 }
+
+bool WifiEsp32::disconnect() {
+    esp_err_t err = esp_wifi_disconnect();
+    if (err == ESP_OK) {
+        pImpl_->updateState(State::DISCONNECTED);
+        ESP_LOGI(TAG, "Disconnected");
+        return true;
+    }
+
+    ESP_LOGE(TAG, "Failed to disconnect: %s", esp_err_to_name(err));
+    return false;
+}
+
+bool WifiEsp32::reconnect() {
+    pImpl_->lock();
+    if (pImpl_->credentials.ssid.empty()) {
+        pImpl_->unlock();
+        ESP_LOGW(TAG, "No stored credentials for reconnection");
+        return false;
+    }
+    pImpl_->unlock();
+
+    return connect(pImpl_->credentials.ssid, pImpl_->credentials.password);
+}
+
+void WifiEsp32::setAutoReconnect(bool enable) {
+    pImpl_->lock();
+    pImpl_->autoReconnect = enable;
+    pImpl_->unlock();
+    ESP_LOGI(TAG, "Auto reconnect: %s", enable ? "enabled" : "disabled");
+}
+
+sys::itf::IWifi::State WifiEsp32::getState() const {
+    pImpl_->lock();
+    State state = pImpl_->currentState;
+    pImpl_->unlock();
+    return state;
+}
+
+std::string_view WifiEsp32::getSSID() const {
+    pImpl_->lock();
+    std::string_view ssid = pImpl_->connectedSSID;
+    pImpl_->unlock();
+    return ssid;
+}
+
+void WifiEsp32::setConnectionCallback(ConnectionCallback callback) {
+    pImpl_->lock();
+    pImpl_->connectionCallback = callback;
+    pImpl_->unlock();
+}
+
+bool WifiEsp32::isConnected() const {
+    return getState() == State::CONNECTED;
+}
+
+} // namespace board
