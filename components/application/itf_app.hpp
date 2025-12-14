@@ -1,6 +1,9 @@
 #pragma once
 
 #include "sys_itf_display.hpp"
+#include "sys_itf_clock.hpp"
+#include "sys_itf_wifi.hpp"
+
 
 namespace app {
 
@@ -17,15 +20,17 @@ public:
 
 } // namespace itf
 
-class TextClockApp : public app::itf::IApp {
+class TextClockApp: public app::itf::IApp {
 public:
-    TextClockApp(sys::itf::IDisplay &display);
+    TextClockApp(sys::itf::IClock &clock, sys::itf::IDisplay &display, sys::itf::IWifi &wifi);
     bool init() override;
     bool close() override;
     bool service() override;
 
 private:
+    sys::itf::IClock &clock_;
     sys::itf::IDisplay &display_;
+    sys::itf::IWifi &wifi_;
 };
 
 } // namespace app

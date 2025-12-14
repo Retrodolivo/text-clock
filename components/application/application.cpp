@@ -2,8 +2,12 @@
 
 namespace app {
 
-TextClockApp::TextClockApp(sys::itf::IDisplay &display)
-  : display_(display) {
+using namespace sys::itf;
+
+TextClockApp::TextClockApp(IClock &clock, IDisplay &display, IWifi &wifi)
+  : clock_(clock)
+  , display_(display)
+  , wifi_(wifi) {
 }
 
 bool TextClockApp::init() {

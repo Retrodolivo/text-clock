@@ -10,5 +10,6 @@ idf_component_register(
         "services"
     PRIV_REQUIRES
         application
+        board
         modules
 )
