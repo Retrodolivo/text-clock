@@ -10,6 +10,8 @@
         "-s", "share/openocd/scripts",
         "-f", "interface/jlink.cfg",
         "-f", "target/esp32.cfg",
+        "-c", "adapter speed 10000",
+        "-c", "set ESP_RTOS none"
       ],
       "problemMatcher": {
         "pattern": [
@@ -30,6 +32,12 @@
         "kind": "build",
         "isDefault": true
       }
+    },
+    {
+      "label": "kill-openocd",
+      "type": "shell",
+      "command": "pkill",
+      "args": ["-f", "openocd"]
     }
   ]
 }
