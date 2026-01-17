@@ -19,10 +19,9 @@ void systemTask(void *arg) {
     /* Create esp32 wifi instance */
     static board::WifiEsp32 network;
 
-
     /* Create text clock application with specified board components */
     static app::TextClockApp clockApplication(clock, display, network);
-
+    clockApplication.init();
 
     /* Periodic system service*/
     while (1) {
