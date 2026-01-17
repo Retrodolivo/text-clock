@@ -37,7 +37,7 @@ public:
     virtual ~IWifi() = default;
 
     /* Connection management */
-    virtual bool connect(const std::string &ssid, const std::string &password) = 0;
+    virtual bool connect(const std::string &ssid = MY_WIFI_SSID, const std::string &password = MY_WIFI_PASSWD) = 0;
     virtual bool disconnect() = 0;
     virtual bool reconnect() = 0;
 
