@@ -10,25 +10,25 @@ namespace sys::service {
 class AppThread {
 public:
     explicit AppThread(app::itf::IApp &app, uint32_t stackSize);
-    bool start();
 
     bool commandInit();
-    bool commandWork();
     bool commandClose();
 
-private:
     enum class State {
-        INIT,
-        WORK,
         CLOSE,
+        WORK,
+        BUSY,
     };
 
+    State getState() const;
+private:
     enum class Command {
-        NONE,
-        INIT,
-        WORK,
         CLOSE,
+        INIT,
+        NONE,
     };
+
+    bool start();
 
     static void stateMachineTask(void *arg);
 

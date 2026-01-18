@@ -8,23 +8,31 @@
 #include "esp_log.h"
 
 static const char *TAG = "systemTask";
+static constexpr uint32_t APP_STACK_SIZE = 3 * 1024;
 
 void systemTask(void *arg) {
     /* Create network clock instance with default configuration */
-    static board::NetworkClock clock;
-
+    board::NetworkClock clock("UTC3");
     /* Create led matrix display with default configuration */
-    static board::LedMatrix display;
-
+    board::LedMatrix display;
     /* Create esp32 wifi instance */
-    static board::WifiEsp32 network;
+    board::WifiEsp32 network;
 
     /* Create text clock application with specified board components */
-    static app::TextClockApp clockApplication(clock, display, network);
-    clockApplication.init();
+    app::TextClockApp clockApplication(clock, display, network);
+
+    using namespace sys::service;
+    /* Create and run the app specific thread to control the flow of app */
+    AppThread appThread(clockApplication, APP_STACK_SIZE);
+    appThread.commandInit();
 
     /* Periodic system service*/
     while (1) {
+        const AppThread::State appState = appThread.getState();
+        if (appState != AppThread::State::WORK) {
+            vTaskDelay(pdMS_TO_TICKS(100));
+        }
+
         vTaskDelay(pdMS_TO_TICKS(100));
     }
 }

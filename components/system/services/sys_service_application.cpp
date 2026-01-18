@@ -14,6 +14,7 @@ AppThread::AppThread(app::itf::IApp &app, uint32_t stackSize)
   , stackSize_(stackSize) {
     static StaticSemaphore_t mutexMem;
     commandMutex_ = xSemaphoreCreateMutexStatic(&mutexMem);
+    start();
 }
 
 bool AppThread::start() {
@@ -32,10 +33,6 @@ bool AppThread::start() {
 
 bool AppThread::commandInit() {
     return setCommand(Command::INIT);
-}
-
-bool AppThread::commandWork() {
-    return setCommand(Command::WORK);
 }
 
 bool AppThread::commandClose() {
@@ -65,6 +62,10 @@ bool AppThread::setCommand(Command cmd) {
     return false;
 }
 
+AppThread::State AppThread::getState() const {
+    return state_;
+}
+
 void AppThread::stateMachineTask(void *arg) {
     AppThread *instance = static_cast<AppThread *>(arg);
     if (instance == nullptr) {
@@ -84,25 +85,8 @@ void AppThread::stateMachineTask(void *arg) {
                 switch (command) {
                     case Command::INIT:
                         if (app.init()) {
-                            state = State::INIT;
+                            state = State::WORK;
                         }
-                        break;
-
-                    default:
-                        break;
-                }
-                break;
-
-            case State::INIT:
-                switch (command) {
-                    case Command::CLOSE:
-                        if (app.close()) {
-                            state = State::CLOSE;
-                        }
-                        break;
-
-                    case Command::WORK:
-                        state = State::WORK;
                         break;
 
                     default:
