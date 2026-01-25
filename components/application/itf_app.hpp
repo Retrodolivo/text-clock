@@ -3,6 +3,7 @@
 #include "sys_itf_display.hpp"
 #include "sys_itf_clock.hpp"
 #include "sys_itf_wifi.hpp"
+#include "render.hpp"
 
 
 namespace app {
@@ -31,6 +32,7 @@ private:
     sys::itf::IClock &clock_;
     sys::itf::IDisplay &display_;
     sys::itf::IWifi &wifi_;
+    Render render_;
 };
 
 } // namespace app

@@ -1,4 +1,5 @@
 #include "itf_app.hpp"
+#include "render.hpp"
 
 namespace app {
 
@@ -16,6 +17,10 @@ TextClockApp::TextClockApp(IClock &clock, IDisplay &display, IWifi &wifi)
  *   before clock sync
  */
 bool TextClockApp::init() {
+    if (!render_.startRenderTo(&display_)) {
+        return false;
+    }
+
     wifi_.setConnectionCallback([this](IWifi::State state, const std::string &ssid) {
         if (state == IWifi::State::ERROR) {
             display_.drawPixel({0, 0}, color::CRGB::Red);
